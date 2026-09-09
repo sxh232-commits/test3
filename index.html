@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>训练异常诊断 · 交互原型</title>
+<style>
+:root{
+  --canvas:#0e1116;
+  --surface:#161b22;
+  --surface-2:#1c232c;
+  --surface-3:#232b36;
+  --line:#2b3440;
+  --line-soft:#222a34;
+  --text-1:#e6edf3;
+  --text-2:#9aa7b4;
+  --text-3:#6b7885;
+  --signal:#f0883e;
+  --signal-soft:rgba(240,136,62,.12);
+  --signal-line:rgba(240,136,62,.35);
+  --ok:#3fb950;
+  --ok-soft:rgba(63,185,80,.12);
+  --info:#58a6ff;
+  --info-soft:rgba(88,166,255,.1);
+  --warn-mid:#d29922;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --canvas-deep:#0a0d11;
+  --surface-hover:#2b3440;
+  --line-hi:#3a4552;
+  --signal-hi:#ff9a4d;
+  --signal-dim:#c2571d;
+  --r-sm:4px; --r-md:7px; --r-lg:11px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--canvas);color:var(--text-1);
+  font-family:var(--sans);font-size:14px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- 外壳 ---------- */
+.shell{max-width:1240px;margin:0 auto;padding:0 20px 72px}
+.topbar{
+  display:flex;align-items:center;gap:14px;
+  padding:16px 0;border-bottom:1px solid var(--line);
+  margin-bottom:0;flex-wrap:wrap;
+}
+.logo{margin:0;
+  display:flex;align-items:center;gap:9px;
+  font-weight:650;letter-spacing:-.01em;font-size:15px;
+}
+.logo-mark{
+  width:22px;height:22px;border-radius:var(--r-sm);
+  background:linear-gradient(135deg,var(--signal),var(--signal-dim));
+  display:grid;place-items:center;font-size:11px;font-weight:700;color:#0e1116;
+}
+.crumb{color:var(--text-3);font-size:13px}
+.crumb b{color:var(--text-2);font-weight:500}
+.demo-flag{
+  margin-left:auto;font-size:11px;color:var(--warn-mid);
+  border:1px solid rgba(210,153,34,.3);background:rgba(210,153,34,.08);
+  padding:3px 9px;border-radius:100px;letter-spacing:.02em;
+}
+
+/* ---------- 步骤条 ---------- */
+.stepper{
+  display:flex;gap:0;margin:22px 0 26px;
+  border:1px solid var(--line);border-radius:var(--r-md);
+  overflow:hidden;background:var(--surface);
+}
+.step{
+  flex:1;display:flex;align-items:center;gap:10px;
+  padding:13px 16px;border:0;background:transparent;
+  color:var(--text-3);font-family:var(--sans);font-size:13px;
+  cursor:pointer;text-align:left;position:relative;
+  border-right:1px solid var(--line-soft);transition:background .16s,color .16s;
+}
+.step:last-child{border-right:0}
+.step:hover:not(.on){background:var(--surface-2);color:var(--text-2)}
+.step:focus-visible{outline:2px solid var(--info);outline-offset:-2px;z-index:2}
+.step-n{
+  width:20px;height:20px;flex:none;border-radius:50%;
+  border:1px solid var(--line);display:grid;place-items:center;
+  font-size:11px;font-family:var(--mono);
+}
+.step.on{background:var(--surface-3);color:var(--text-1)}
+.step.on .step-n{background:var(--signal);border-color:var(--signal);color:var(--canvas);font-weight:700}
+.step.done .step-n{border-color:var(--ok);color:var(--ok)}
+.step-label{display:flex;flex-direction:column;line-height:1.35}
+.step-label i{font-style:normal;font-size:11px;color:var(--text-3)}
+.step.on .step-label i{color:var(--signal)}
+.step-actor{
+  position:absolute;top:0;left:0;right:0;height:2px;background:transparent;
+}
+.step.on .step-actor{background:var(--signal)}
+
+/* ---------- 视图 ---------- */
+.view{display:none;animation:fade .22s ease-out}
+.view.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.view.on{animation:none}}
+
+.vhead{margin-bottom:18px}
+.vhead h2{
+  font-size:19px;font-weight:640;letter-spacing:-.015em;margin-bottom:5px;
+}
+.vhead p{color:var(--text-2);font-size:13px;max-width:78ch}
+.actor-tag{
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;
+  padding:2px 8px;border-radius:100px;margin-left:8px;
+  vertical-align:middle;font-weight:500;
+}
+.actor-sys{background:var(--info-soft);color:var(--info);border:1px solid rgba(88,166,255,.25)}
+.actor-hum{background:var(--signal-soft);color:var(--signal);border:1px solid var(--signal-line)}
+
+/* ---------- 表格 ---------- */
+.panel{
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;
+}
+.panel-hd{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 16px;border-bottom:1px solid var(--line);
+  font-size:12px;color:var(--text-2);letter-spacing:.02em;
+}
+.panel-hd .ct{margin-left:auto;color:var(--text-3);font-size:11px}
+table{width:100%;border-collapse:collapse}
+th{
+  text-align:left;font-size:11px;font-weight:500;color:var(--text-3);
+  padding:9px 16px;border-bottom:1px solid var(--line-soft);
+  letter-spacing:.03em;text-transform:uppercase;
+}
+td{padding:12px 16px;border-bottom:1px solid var(--line-soft);font-size:13px;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tr.row-alert{background:var(--signal-soft);cursor:pointer;transition:background .15s}
+tr.row-alert:hover{background:rgba(240,136,62,.18)}
+tr.row-quiet{color:var(--text-2)}
+.exp-name{font-weight:550;color:var(--text-1);display:flex;align-items:center;gap:8px}
+.dot{width:6px;height:6px;border-radius:50%;flex:none}
+.dot-alert{background:var(--signal);box-shadow:0 0 0 3px var(--signal-soft)}
+.dot-ok{background:var(--ok)}
+.dot-idle{background:var(--text-3)}
+.badge{
+  display:inline-block;font-size:11px;padding:2px 8px;border-radius:var(--r-sm);
+  border:1px solid transparent;white-space:nowrap;
+}
+.b-alert{background:var(--signal-soft);color:var(--signal);border-color:var(--signal-line)}
+.b-ok{background:var(--ok-soft);color:var(--ok);border-color:rgba(63,185,80,.25)}
+.b-idle{background:var(--surface-3);color:var(--text-3);border-color:var(--line)}
+.tap-hint{
+  font-size:11px;color:var(--signal);display:inline-flex;align-items:center;gap:4px;
+}
+
+/* ---------- 告警卡 ---------- */
+.alertcard{
+  margin-top:16px;background:var(--surface);
+  border:1px solid var(--signal-line);border-radius:var(--r-lg);
+  border-left:3px solid var(--signal);overflow:hidden;
+}
+.ac-top{display:flex;gap:14px;padding:16px 18px;align-items:flex-start;flex-wrap:wrap}
+.ac-icon{
+  width:32px;height:32px;flex:none;border-radius:var(--r-md);
+  background:var(--signal-soft);color:var(--signal);
+  display:grid;place-items:center;font-size:16px;
+}
+.ac-body{flex:1;min-width:240px}
+.ac-title{font-size:15px;font-weight:600;margin-bottom:4px}
+.ac-meta{font-size:12px;color:var(--text-2);display:flex;gap:14px;flex-wrap:wrap}
+.ac-meta span{display:inline-flex;gap:5px}
+.ac-meta b{color:var(--text-1);font-weight:500}
+.ac-num{
+  display:flex;gap:22px;padding:14px 18px;
+  background:var(--surface-2);border-top:1px solid var(--line-soft);flex-wrap:wrap;
+}
+.numcell label{display:block;font-size:11px;color:var(--text-3);margin-bottom:3px}
+.numcell .v{font-size:17px;font-weight:600;letter-spacing:-.02em}
+.v-bad{color:var(--signal)}
+.v-arrow{color:var(--text-3);font-size:13px;padding:0 2px}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 15px;border-radius:var(--r-md);border:1px solid var(--line);
+  background:var(--surface-3);color:var(--text-1);
+  font-family:var(--sans);font-size:13px;cursor:pointer;
+  transition:background .15s,border-color .15s;
+}
+.btn:hover{background:var(--surface-hover);border-color:var(--line-hi)}
+.btn:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+.btn-primary{background:var(--signal);border-color:var(--signal);color:var(--canvas);font-weight:600}
+.btn-primary:hover{background:var(--signal-hi);border-color:var(--signal-hi)}
+.btn-ghost{background:transparent}
+.btnrow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center}
+.btnrow .note{font-size:12px;color:var(--text-3)}
+
+/* ---------- 两栏 ---------- */
+.split{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start}
+@media (max-width:900px){.split{grid-template-columns:1fr}}
+
+/* ---------- 曲线 ---------- */
+.chart-wrap{padding:16px}
+.chart-legend{display:flex;gap:16px;margin-bottom:12px;font-size:11px;color:var(--text-2);flex-wrap:wrap}
+.chart-legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.ax{stroke:var(--line);stroke-width:1}
+.grid{stroke:var(--line-soft);stroke-width:1;stroke-dasharray:2 4}
+.axlbl{fill:var(--text-3);font-size:9.5px;font-family:var(--mono)}
+.ln-cur{fill:none;stroke:var(--signal);stroke-width:2;stroke-linejoin:round}
+.ln-ref{fill:none;stroke:var(--ok);stroke-width:1.5;stroke-dasharray:4 3;opacity:.75}
+.anom-band{fill:var(--signal-soft)}
+.anom-pt{fill:var(--signal);stroke:var(--canvas);stroke-width:2}
+.anom-lbl{fill:var(--signal);font-size:10px;font-family:var(--mono);font-weight:600}
+
+/* ---------- 候选原因 ---------- */
+.cause{
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-2);margin-bottom:10px;overflow:hidden;
+  transition:border-color .15s;
+}
+.cause:last-child{margin-bottom:0}
+.cause.sel{border-color:var(--signal)}
+.cause-hd{
+  display:flex;align-items:flex-start;gap:11px;padding:13px 14px;
+  cursor:pointer;background:transparent;border:0;width:100%;text-align:left;
+  font-family:var(--sans);color:var(--text-1);
+}
+.cause-hd:hover{background:var(--surface-3)}
+.cause-hd:focus-visible{outline:2px solid var(--info);outline-offset:-2px}
+.rank{
+  width:19px;height:19px;flex:none;border-radius:var(--r-sm);
+  display:grid;place-items:center;font-size:10.5px;font-weight:700;
+  font-family:var(--mono);background:var(--surface-3);color:var(--text-2);
+  border:1px solid var(--line);
+}
+.cause.sel .rank{background:var(--signal);color:#0e1116;border-color:var(--signal)}
+.cause-main{flex:1;min-width:0;display:block}
+.cause-t{display:block;font-size:13.5px;font-weight:550;margin-bottom:3px;line-height:1.4}
+.cause-s{display:block;font-size:12px;color:var(--text-2);line-height:1.5}
+.conf{
+  flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;
+  min-width:52px;
+}
+.conf-lbl{font-size:10px;color:var(--text-3);white-space:nowrap}
+.conf-v{font-size:11px;font-weight:600;padding:2px 7px;border-radius:var(--r-sm)}
+.c-high{background:var(--signal-soft);color:var(--signal)}
+.c-mid{background:rgba(210,153,34,.14);color:var(--warn-mid)}
+.c-low{background:var(--surface-3);color:var(--text-3)}
+.cause-body{display:none;padding:0 14px 14px 44px;border-top:1px solid var(--line-soft)}
+.cause.open .cause-body{display:block}
+.cause-body h5{font-size:11px;color:var(--text-3);letter-spacing:.03em;margin:13px 0 7px;text-transform:uppercase}
+
+/* ---------- 证据链 ---------- */
+.ev{
+  display:flex;gap:10px;flex-wrap:wrap;padding:9px 11px;background:var(--surface);
+  border:1px solid var(--line-soft);border-radius:var(--r-sm);
+  margin-bottom:7px;font-size:12px;align-items:flex-start;
+}
+.ev:last-child{margin-bottom:0}
+.ev-k{
+  flex:none;font-size:10px;padding:1px 6px;border-radius:3px;
+  background:var(--surface-3);color:var(--text-3);margin-top:1px;
+}
+.ev-c{flex:1;min-width:0;color:var(--text-2);line-height:1.55}
+.ev-c code{
+  font-family:var(--mono);font-size:11.5px;color:var(--text-1);
+  background:var(--surface-3);padding:1px 5px;border-radius:3px;
+}
+.jump{
+  flex:none;background:transparent;border:0;cursor:pointer;
+  color:var(--info);font-size:11px;font-family:var(--sans);
+  padding:1px 4px;border-radius:3px;white-space:nowrap;
+}
+.jump:hover{background:var(--info-soft);text-decoration:underline}
+.jump:focus-visible{outline:2px solid var(--info);outline-offset:1px}
+
+/* ---------- diff ---------- */
+.diff{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+.diff th{padding:8px 12px;font-family:var(--sans)}
+.diff td{padding:9px 12px;border-bottom:1px solid var(--line-soft)}
+.diff tr.hit{background:var(--signal-soft)}
+.diff tr.hit td:first-child{box-shadow:inset 2px 0 0 var(--signal)}
+.fkey{color:var(--text-1)}
+.fval-cur{color:var(--signal)}
+.fval-ref{color:var(--ok)}
+.same{color:var(--text-3)}
+.rel{
+  font-family:var(--sans);font-size:10.5px;padding:1px 7px;border-radius:3px;
+  background:var(--surface-3);color:var(--text-3);white-space:nowrap;
+}
+.rel-hi{background:var(--signal-soft);color:var(--signal)}
+
+/* ---------- 日志 ---------- */
+.logbox{
+  background:var(--canvas-deep);border:1px solid var(--line);border-radius:var(--r-md);
+  font-family:var(--mono);font-size:11.5px;line-height:1.75;
+  max-height:280px;overflow:auto;
+}
+.logline{display:flex;gap:0;padding:0 2px}
+.logline:hover{background:rgba(255,255,255,.03)}
+.ln-no{
+  flex:none;width:48px;text-align:right;padding-right:12px;
+  color:var(--text-3);user-select:none;
+}
+.ln-tx{flex:1;color:var(--text-2);white-space:pre-wrap;word-break:break-all;padding-right:8px}
+.logline.hl{background:var(--signal-soft)}
+.logline.hl .ln-tx{color:var(--text-1)}
+.logline.hl .ln-no{color:var(--signal);font-weight:700}
+.logline.flash{animation:flash 1.5s ease-out}
+@keyframes flash{0%,25%{background:rgba(240,136,62,.4)}100%{background:var(--signal-soft)}}
+@media (prefers-reduced-motion:reduce){.logline.flash{animation:none}}
+.lg-warn{color:var(--warn-mid)}
+.lg-err{color:var(--signal)}
+
+/* ---------- 表单 ---------- */
+.form-row{margin-bottom:16px}
+.form-row>label{display:block;font-size:12px;color:var(--text-2);margin-bottom:7px}
+.form-row .req{color:var(--signal)}
+.opts{display:flex;flex-direction:column;gap:7px}
+.opt{
+  display:flex;align-items:flex-start;gap:9px;padding:10px 12px;
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-2);cursor:pointer;font-size:13px;
+  transition:border-color .15s,background .15s;
+}
+.opt:hover{background:var(--surface-3)}
+.opt input{margin-top:3px;accent-color:var(--signal);flex:none}
+.opt.on{border-color:var(--signal);background:var(--signal-soft)}
+.opt-t{line-height:1.45}
+.opt-t i{display:block;font-style:normal;font-size:11.5px;color:var(--text-3);margin-top:2px}
+textarea,select,input[type=text]{
+  width:100%;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-md);color:var(--text-1);padding:9px 11px;
+  font-family:var(--sans);font-size:13px;resize:vertical;
+}
+textarea:focus,select:focus,input:focus{outline:2px solid var(--info);outline-offset:-1px;border-color:var(--info)}
+textarea{min-height:74px;line-height:1.6}
+
+/* ---------- 回流结果 ---------- */
+.flowback{
+  display:none;margin-top:16px;padding:16px 18px;
+  background:var(--ok-soft);border:1px solid rgba(63,185,80,.3);
+  border-radius:var(--r-lg);border-left:3px solid var(--ok);
+}
+.flowback.on{display:block}
+.fb-t{display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ok);margin-bottom:10px;font-size:14px}
+.fb-list{list-style:none;font-size:12.5px;color:var(--text-2)}
+.fb-list li{padding:5px 0 5px 18px;position:relative;line-height:1.55}
+.fb-list li::before{content:"→";position:absolute;left:0;color:var(--ok)}
+.fb-list b{color:var(--text-1);font-weight:550}
+
+/* ---------- 提示条 ---------- */
+.tip{
+  display:flex;gap:10px;padding:11px 14px;margin-bottom:16px;
+  background:var(--info-soft);border:1px solid rgba(88,166,255,.22);
+  border-radius:var(--r-md);font-size:12.5px;color:var(--text-2);line-height:1.55;
+}
+.tip-i{color:var(--info);flex:none;font-weight:700}
+.tip b{color:var(--text-1);font-weight:550}
+
+.nores{
+  padding:14px;background:var(--surface-2);border:1px dashed var(--line);
+  border-radius:var(--r-md);font-size:12.5px;color:var(--text-3);text-align:center;
+}
+/* 窄屏：步骤条改为两列，避免文字竖排 */
+@media (max-width:640px){
+  .stepper{flex-wrap:wrap}
+  .step{flex:1 1 50%;min-width:50%;border-bottom:1px solid var(--line-soft);padding:11px 12px}
+  .step:nth-child(2),.step:nth-child(4){border-right:0}
+  .step:nth-child(5){border-bottom:0}
+  .step-label{font-size:12.5px}
+  .step-label i{font-size:10.5px}
+  .ac-num{gap:16px}
+  .numcell .v{font-size:15px}
+  .vhead h2{font-size:17px}
+  .cause-body{padding-left:14px}
+  .diff{font-size:11px}
+  .col-sec{display:none}
+  .exp-name{white-space:nowrap}
+  td,th{padding-left:12px;padding-right:12px}
+  .tap-hint{display:block;margin-top:4px}
+  .diff td,.diff th{padding:8px 10px}
+}
+@media (max-width:400px){
+  .step{flex:1 1 100%;min-width:100%;border-right:0}
+  .step:nth-child(3){border-bottom:1px solid var(--line-soft)}
+}
+
+/* ---------- 归属域判别 ---------- */
+.domain{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+@media (max-width:760px){.domain{grid-template-columns:1fr}}
+.dcard{
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-2);padding:14px;position:relative;
+}
+.dcard.ruled-out{opacity:.5}
+.dcard.picked{border-color:var(--signal);background:var(--signal-soft)}
+.dcard-t{font-size:13.5px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:7px}
+.dcard-t .vd{
+  font-size:10px;padding:1px 7px;border-radius:3px;font-weight:600;margin-left:auto;
+}
+.vd-yes{background:var(--signal);color:var(--canvas)}
+.vd-no{background:var(--surface-3);color:var(--text-3)}
+.dcard-s{font-size:12px;color:var(--text-2);line-height:1.55}
+.dcard-ev{margin-top:10px;font-size:11.5px;color:var(--text-3);border-top:1px solid var(--line-soft);padding-top:9px;line-height:1.6}
+.dcard-ev code{font-family:var(--mono);color:var(--text-2);background:var(--surface-3);padding:1px 4px;border-radius:3px}
+
+/* 并发任务时间轴 */
+.tl{padding:14px}
+.tlrow{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px}
+.tlrow:last-child{margin-bottom:0}
+.tl-name{flex:none;width:88px;font-family:var(--mono);color:var(--text-2)}
+.tl-bar{flex:1;height:20px;background:var(--surface-2);border-radius:3px;position:relative;overflow:hidden}
+.tl-seg{position:absolute;top:0;bottom:0;border-radius:2px}
+.tl-ok{background:rgba(63,185,80,.28)}
+.tl-bad{background:var(--signal);opacity:.85}
+.tl-tag{flex:none;font-size:10.5px;color:var(--text-3);width:70px;text-align:right}
+.tl-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);font-family:var(--mono);margin:8px 0 0 98px;padding-right:78px}
+
+/* ---------- 大模型标注 ---------- */
+.llm-tag{
+  display:inline-flex;align-items:center;gap:4px;font-size:10px;
+  padding:1px 6px;border-radius:3px;margin-left:6px;
+  background:rgba(163,113,247,.14);color:#a371f7;border:1px solid rgba(163,113,247,.3);
+  font-weight:500;vertical-align:middle;
+}
+.rule-tag{
+  display:inline-flex;align-items:center;gap:4px;font-size:10px;
+  padding:1px 6px;border-radius:3px;margin-left:6px;
+  background:var(--info-soft);color:var(--info);border:1px solid rgba(88,166,255,.25);
+  font-weight:500;vertical-align:middle;
+}
+.verify{
+  display:flex;align-items:center;gap:7px;margin-top:10px;padding:8px 11px;
+  background:var(--ok-soft);border:1px solid rgba(63,185,80,.25);
+  border-radius:var(--r-sm);font-size:11.5px;color:var(--text-2);
+}
+.verify b{color:var(--ok);font-weight:600}
+
+/* ---------- 条件对照 ---------- */
+.cond{width:100%;border-collapse:collapse;font-size:12px}
+.cond th{padding:8px 11px;font-family:var(--sans)}
+.cond td{padding:9px 11px;border-bottom:1px solid var(--line-soft);font-family:var(--mono)}
+.cond tr.bad td{background:var(--signal-soft)}
+.cond tr.bad .st{color:var(--signal);font-weight:600}
+.cond .st-ok{color:var(--ok)}
+.cond .sames{color:var(--text-3)}
+
+/* ---------- 搁置出口 ---------- */
+.opt.shelve.on{border-color:var(--warn-mid);background:rgba(210,153,34,.1)}
+.opt.shelve input{accent-color:var(--warn-mid)}
+.sub-q{
+  display:none;margin-top:9px;padding:11px 12px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);
+}
+.sub-q.on{display:block}
+.sub-q label{display:block;font-size:11.5px;color:var(--text-2);margin-bottom:7px}
+.fb-warn{
+  display:none;margin-top:16px;padding:16px 18px;
+  background:rgba(210,153,34,.09);border:1px solid rgba(210,153,34,.3);
+  border-radius:var(--r-lg);border-left:3px solid var(--warn-mid);
+}
+.fb-warn.on{display:block}
+.fb-warn .fb-t{color:var(--warn-mid)}
+.fb-warn .fb-list li::before{color:var(--warn-mid)}
+.footnote{
+  margin-top:28px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:11.5px;color:var(--text-3);line-height:1.7;
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar">
+    <h1 class="logo"><span class="logo-mark">D</span>训练平台</h1>
+    <div class="crumb">模型训练 / <b>异常诊断</b></div>
+    <div class="demo-flag">交互原型 · 页面数据为演示用例</div>
+  </header>
+
+  <nav class="stepper" role="tablist" aria-label="诊断流程">
+    <button class="step on" role="tab" aria-selected="true" data-go="0">
+      <span class="step-actor"></span><span class="step-n">1</span>
+      <span class="step-label">告警发现<i>系统触发</i></span>
+    </button>
+    <button class="step" role="tab" aria-selected="false" data-go="1">
+      <span class="step-actor"></span><span class="step-n">2</span>
+      <span class="step-label">集群判别<i>系统定域</i></span>
+    </button>
+    <button class="step" role="tab" aria-selected="false" data-go="2">
+      <span class="step-actor"></span><span class="step-n">3</span>
+      <span class="step-label">诊断结论<i>系统归因</i></span>
+    </button>
+    <button class="step" role="tab" aria-selected="false" data-go="3">
+      <span class="step-actor"></span><span class="step-n">4</span>
+      <span class="step-label">证据与对比<i>系统取证</i></span>
+    </button>
+    <button class="step" role="tab" aria-selected="false" data-go="4">
+      <span class="step-actor"></span><span class="step-n">5</span>
+      <span class="step-label">确认与回流<i>工程师拍板</i></span>
+    </button>
+  </nav>
+
+  <main id="main">
+  <!-- ============ 视图 1：告警发现 ============ -->
+  <section class="view on" id="v0" role="tabpanel">
+    <div class="vhead">
+      <h2>训练任务列表<span class="actor-tag actor-sys">系统检测</span></h2>
+      <p>共 37 个任务运行中，1 个检出异常。</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-hd">
+        <span>运行中的实验</span>
+        <span class="ct">共 4 个任务 · 1 个待处理异常</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>实验</th><th class="col-sec">模型 / 数据</th><th>当前步数</th><th>Loss</th><th>状态</th></tr>
+        </thead>
+        <tbody>
+          <tr class="row-alert" id="alertRow" tabindex="0" role="button" aria-label="查看 exp-2417 的诊断结论">
+            <td><div class="exp-name"><span class="dot dot-alert"></span>exp-2417</div></td>
+            <td class="mono col-sec" style="color:var(--text-2)">base-13B / corpus-v4.2</td>
+            <td class="mono">12,400</td>
+            <td class="mono v-bad">3.87 ↑</td>
+            <td><span class="badge b-alert">Loss 突变</span> <span class="tap-hint">点击查看 →</span></td>
+          </tr>
+          <tr class="row-quiet">
+            <td><div class="exp-name"><span class="dot dot-ok"></span>exp-2415</div></td>
+            <td class="mono col-sec">base-13B / corpus-v4.2</td>
+            <td class="mono">14,850</td>
+            <td class="mono">2.04</td>
+            <td><span class="badge b-ok">正常</span></td>
+          </tr>
+          <tr class="row-quiet">
+            <td><div class="exp-name"><span class="dot dot-ok"></span>exp-2410</div></td>
+            <td class="mono col-sec">base-7B / corpus-v4.1</td>
+            <td class="mono">31,200</td>
+            <td class="mono">1.88</td>
+            <td><span class="badge b-ok">正常</span></td>
+          </tr>
+          <tr class="row-quiet">
+            <td><div class="exp-name"><span class="dot dot-idle"></span>exp-2402</div></td>
+            <td class="mono col-sec">base-13B / corpus-v4.0</td>
+            <td class="mono">20,000</td>
+            <td class="mono">2.11</td>
+            <td><span class="badge b-idle">已完成</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alertcard">
+      <div class="ac-top">
+        <div class="ac-icon">!</div>
+        <div class="ac-body">
+          <div class="ac-title">exp-2417 · Loss 在第 12,400 步出现突变反弹</div>
+          <div class="ac-meta">
+            <span>触发规则：<b>连续 200 步 loss 上升且涨幅 &gt; 50%</b></span>
+            <span>检出时间：<b class="mono">14:32:08</b></span>
+            <span>同因合并：<b>3 条</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="ac-num">
+        <div class="numcell"><label>异常前 Loss</label><div class="v mono">2.13</div></div>
+        <div class="numcell" style="align-self:center"><div class="v-arrow mono">──→</div></div>
+        <div class="numcell"><label>当前 Loss</label><div class="v mono v-bad">3.87</div></div>
+        <div class="numcell"><label>梯度范数</label><div class="v mono">4.21</div></div>
+        <div class="numcell"><label>已消耗算力</label><div class="v mono">1,840 卡时</div></div>
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn btn-primary" data-go="1">开始诊断</button>
+      <button class="btn btn-ghost">标记为已知波动，进入静默</button>
+      
+    </div>
+  </section>
+
+  <!-- ============ 视图 2：集群判别 ============ -->
+  <section class="view" id="v1" role="tabpanel">
+    <div class="vhead">
+      <h2>问题归属域判别<span class="actor-tag actor-sys">系统定域</span></h2>
+      <p>已排除集群级事件与基础设施故障，判定为任务内部问题。</p>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-hd">
+        <span>同时间窗内的任务异常分布</span>
+        <span class="ct">当前集群运行 37 个训练任务 · 窗口 14:30 – 14:35</span>
+      </div>
+      <div class="tl">
+        <div class="tlrow">
+          <span class="tl-name">exp-2417</span>
+          <span class="tl-bar"><span class="tl-seg tl-ok" style="left:0;width:62%"></span><span class="tl-seg tl-bad" style="left:62%;width:38%"></span></span>
+          <span class="tl-tag" style="color:var(--signal)">本任务异常</span>
+        </div>
+        <div class="tlrow">
+          <span class="tl-name">exp-2415</span>
+          <span class="tl-bar"><span class="tl-seg tl-ok" style="left:0;width:100%"></span></span>
+          <span class="tl-tag">正常</span>
+        </div>
+        <div class="tlrow">
+          <span class="tl-name">exp-2410</span>
+          <span class="tl-bar"><span class="tl-seg tl-ok" style="left:0;width:100%"></span></span>
+          <span class="tl-tag">正常</span>
+        </div>
+        <div class="tlrow">
+          <span class="tl-name">exp-2433</span>
+          <span class="tl-bar"><span class="tl-seg tl-ok" style="left:0;width:100%"></span></span>
+          <span class="tl-tag">正常</span>
+        </div>
+        <div class="tlrow">
+          <span class="tl-name">其余 33 个</span>
+          <span class="tl-bar"><span class="tl-seg tl-ok" style="left:0;width:100%"></span></span>
+          <span class="tl-tag">正常</span>
+        </div>
+        <div class="tl-axis"><span>14:30</span><span>14:32</span><span>14:35</span></div>
+      </div>
+    </div>
+
+    <div class="domain">
+      <div class="dcard picked">
+        <div class="dcard-t">任务内部问题<span class="vd vd-yes">判定</span></div>
+        <div class="dcard-s">异常仅出现在 exp-2417，同期其余 36 个任务指标正常，且异常起点与本任务的调度阶段切换时刻重合。</div>
+        <div class="dcard-ev">支撑：全局 rank 指标离散度 <code>0.03</code>（正常区间），无跨任务同类异常，异常起点 <code>14:31:47</code> 与本任务 <code>stage2</code> 切换同一秒。</div>
+      </div>
+      <div class="dcard ruled-out">
+        <div class="dcard-t">集群级事件<span class="vd vd-no">已排除</span></div>
+        <div class="dcard-s">同窗口内未出现多任务并发异常。</div>
+        <div class="dcard-ev">排除依据：同窗口内并发异常任务数 <code>1 / 37</code>，未达集群事件判定条件。</div>
+      </div>
+      <div class="dcard ruled-out">
+        <div class="dcard-t">基础设施局部故障<span class="vd vd-no">已排除</span></div>
+        <div class="dcard-s">异常未集中于特定节点、机架或通信域，基础设施监控在该窗口内无关联事件。</div>
+        <div class="dcard-ev">排除依据：无硬件告警、无通信超时、无节点状态变更记录。</div>
+      </div>
+      <div class="dcard ruled-out">
+        <div class="dcard-t">单节点 rank 异常<span class="vd vd-no">已排除</span></div>
+        <div class="dcard-s">异常在全部 rank 上同步出现，非个别节点偏离，可排除单卡或单节点问题。</div>
+        <div class="dcard-ev">排除依据：8,192 个 rank 的 loss 离散度 <code>0.03</code>，无显著偏离群体的 rank。</div>
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn btn-primary" data-go="2">进入任务内部诊断</button>
+      <button class="btn btn-ghost" data-go="0">返回列表</button>
+      
+    </div>
+  </section>
+
+  <!-- ============ 视图 3：诊断结论 ============ -->
+  <section class="view" id="v2" role="tabpanel">
+    <div class="vhead">
+      <h2>exp-2417 诊断结论<span class="actor-tag actor-sys">系统归因</span></h2>
+      <p>Loss 突变 · 第 12,400 步 · 检出 2 条候选原因，第 3 条因证据不足未展示。</p>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel-hd"><span>Loss 曲线 · 与历史正常实验对照</span><span class="ct">步数 11,000 – 13,000</span></div>
+        <div class="chart-wrap">
+          <div class="chart-legend">
+            <span><i style="background:var(--signal)"></i>exp-2417（当前）</span>
+            <span><i style="background:var(--ok);opacity:.75"></i>exp-2415（正常基准）</span>
+            <span><i style="background:var(--signal-soft);height:8px"></i>异常区间</span>
+          </div>
+          <svg viewBox="0 0 520 240" role="img" aria-label="Loss 曲线：当前实验在第 12400 步由 2.13 反弹至 3.87，历史正常实验持续下降">
+            <rect class="anom-band" x="326" y="14" width="174" height="182"/>
+            <line class="grid" x1="46" y1="14" x2="500" y2="14"/>
+            <line class="grid" x1="46" y1="59" x2="500" y2="59"/>
+            <line class="grid" x1="46" y1="105" x2="500" y2="105"/>
+            <line class="grid" x1="46" y1="150" x2="500" y2="150"/>
+            <line class="ax" x1="46" y1="196" x2="500" y2="196"/>
+            <line class="ax" x1="46" y1="14" x2="46" y2="196"/>
+            <text class="axlbl" x="40" y="18" text-anchor="end">4.0</text>
+            <text class="axlbl" x="40" y="63" text-anchor="end">3.4</text>
+            <text class="axlbl" x="40" y="109" text-anchor="end">2.8</text>
+            <text class="axlbl" x="40" y="154" text-anchor="end">2.2</text>
+            <text class="axlbl" x="40" y="200" text-anchor="end">1.6</text>
+            <text class="axlbl" x="46" y="214">11.0k</text>
+            <text class="axlbl" x="186" y="214">11.6k</text>
+            <text class="axlbl" x="326" y="214">12.4k</text>
+            <text class="axlbl" x="500" y="214" text-anchor="end">13.0k</text>
+            <text class="axlbl" x="273" y="232" text-anchor="middle" style="font-size:10px">训练步数</text>
+            <path class="ln-ref" d="M46,150 L92,153 L139,156 L186,158 L233,161 L279,163 L326,165 L372,168 L419,170 L465,172 L500,173"/>
+            <path class="ln-cur" d="M46,149 L92,152 L139,154 L186,157 L233,159 L279,160 L326,158 L349,96 L372,40 L419,28 L465,33 L500,30"/>
+            <line x1="326" y1="14" x2="326" y2="196" stroke="var(--signal)" stroke-width="1" stroke-dasharray="3 3" opacity=".6"/>
+            <circle class="anom-pt" cx="326" cy="158" r="4.5"/>
+            <text class="anom-lbl" x="334" y="150">12,400 步 · 2.13</text>
+            <circle class="anom-pt" cx="419" cy="28" r="4.5"/>
+            <text class="anom-lbl" x="411" y="20" text-anchor="end">反弹至 3.87</text>
+          </svg>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hd"><span>候选原因<span class="rule-tag">规则排序</span></span><span class="ct">本次给出 2 条 · 第 3 条证据不足未展示</span></div>
+        <div style="padding:14px">
+
+          <div class="cause sel open" data-cause="0">
+            <button class="cause-hd" aria-expanded="true">
+              <span class="rank">1</span>
+              <span class="cause-main">
+                <span class="cause-t">学习率调度在 12,400 步切换至第二阶段，峰值学习率未随批次调整</span>
+                <span class="cause-s">调度切换点与异常起点完全重合；同结构历史实验中该配置组合曾 2 次引发同类反弹</span>
+              </span>
+              <span class="conf"><span class="conf-lbl">置信度</span><span class="conf-v c-high">高</span></span>
+            </button>
+            <div class="cause-body">
+              <h5>证据链<span class="rule-tag">检索取证</span></h5>
+              <div class="ev">
+                <span class="ev-k">配置</span>
+                <span class="ev-c">当前 <code>lr_schedule.stage2_peak = 3.0e-4</code>，正常基准 exp-2415 为 <code>1.2e-4</code>，差异 2.5 倍</span>
+                <button class="jump" data-jump="cfg" aria-label="跳转至配置差异表">查看配置差异 ↗</button>
+              </div>
+              <div class="ev">
+                <span class="ev-k">日志</span>
+                <span class="ev-c">第 12,400 步日志记录调度阶段切换，紧随其后出现梯度范数跃升</span>
+                <button class="jump" data-jump="log" data-line="4" aria-label="跳转至原始日志第 8815 行">定位日志第 8815 行 ↗</button>
+              </div>
+              <div class="ev">
+                <span class="ev-k">历史</span>
+                <span class="ev-c">exp-2388、exp-2391 出现同类反弹，均定位为阶段二学习率过高，处置方式为下调峰值后重跑<span class="llm-tag">大模型归纳</span></span>
+                <button class="jump" data-jump="cfg" aria-label="跳转至历史实验对比">对比历史实验 ↗</button>
+              </div>
+              <div class="verify">
+                <span>✓</span><div>证据一致性校验<b>通过</b> —— 表述中引用的 2 项配置、1 处日志行号、2 个历史实验编号均在证据集中核对存在</div>
+              </div>
+              <h5>建议下一步</h5>
+              <div class="ev">
+                <span class="ev-k">动作</span>
+                <span class="ev-c">从第 12,000 步检查点回滚，将 <code>stage2_peak</code> 下调至 <code>1.2e-4</code> 后重跑 500 步观察</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cause" data-cause="1">
+            <button class="cause-hd" aria-expanded="false">
+              <span class="rank">2</span>
+              <span class="cause-main">
+                <span class="cause-t">条件触发型：当前数据配比在阶段二才引发异常，阶段一表现正常</span>
+                <span class="cause-s">配置与 exp-2422 一致，差异在数据配比与训练阶段</span>
+              </span>
+              <span class="conf"><span class="conf-lbl">置信度</span><span class="conf-v c-mid">中</span></span>
+            </button>
+            <div class="cause-body">
+              <h5>条件对照<span class="rule-tag">条件比对</span></h5>
+              <div style="border:1px solid var(--line-soft);border-radius:var(--r-sm);overflow:hidden;margin-bottom:8px">
+                <table class="cond">
+                  <thead><tr><th>实验</th><th>长文本占比</th><th>阶段</th><th>表现</th></tr></thead>
+                  <tbody>
+                    <tr><td class="sames">exp-2422</td><td class="sames">31%</td><td class="sames">阶段一</td><td class="st st-ok">正常</td></tr>
+                    <tr><td class="sames">exp-2422</td><td class="sames">31%</td><td class="sames">阶段二</td><td class="st st-ok">正常</td></tr>
+                    <tr><td class="sames">exp-2417</td><td class="sames">44%</td><td class="sames">阶段一</td><td class="st st-ok">正常</td></tr>
+                    <tr class="bad"><td>exp-2417</td><td>44%</td><td>阶段二</td><td class="st">异常</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="ev">
+                <span class="ev-k">关键</span>
+                <span class="ev-c"><b>配置差异为空</b>：exp-2417 与 exp-2422 的超参、调度策略、并行配置完全一致，纯配置比对无法解释本次异常</span>
+              </div>
+              <div class="ev">
+                <span class="ev-k">条件</span>
+                <span class="ev-c">长文本占比 <code>44%</code> 高于 exp-2422 的 <code>31%</code>，且异常只在阶段二出现，阶段一同配比下正常</span>
+                <button class="jump" data-jump="log" data-line="7" aria-label="跳转至数据采样日志记录">查看采样记录 ↗</button>
+              </div>
+              <div class="ev">
+                <span class="ev-k">推断</span>
+                <span class="ev-c">高长文本占比在阶段二的较大学习率下放大了梯度波动，两条件叠加才触发异常<span class="llm-tag">大模型表述</span></span>
+              </div>
+              <div class="verify">
+                <span>✓</span><div>证据一致性校验<b>通过</b> —— 引用的配比数值与实验编号均在证据集中核对存在</div>
+              </div>
+              <h5>建议下一步</h5>
+              <div class="ev">
+                <span class="ev-k">动作</span>
+                <span class="ev-c">此项无需改配置。可将阶段二的长文本占比降至 <code>31%</code> 附近，或为阶段二单独设置更保守的调度</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="cause" data-cause="2" style="opacity:.72">
+            <button class="cause-hd" aria-expanded="false" style="cursor:default">
+              <span class="rank" style="background:var(--surface-3);color:var(--text-3)">—</span>
+              <span class="cause-main">
+                <span class="cause-t" style="color:var(--text-2)">第 3 条候选未予展示：证据不足</span>
+                <span class="cause-s">检出 <code style="font-family:var(--mono)">grad_clip</code> 存在差异，但异常前梯度范数未触及原阈值，无可溯源证据支撑</span>
+              </span>
+              <span class="conf"><span class="conf-lbl">已拦截</span><span class="conf-v c-low">克制</span></span>
+            </button>
+          </div>
+
+
+
+        </div>
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn btn-primary" data-go="3">查看证据与历史对比</button>
+      <button class="btn btn-ghost" data-go="0">返回列表</button>
+      
+    </div>
+  </section>
+
+  <!-- ============ 视图 3：证据与对比 ============ -->
+  <section class="view" id="v3" role="tabpanel">
+    <div class="vhead">
+      <h2>证据与历史对比<span class="actor-tag actor-sys">系统取证</span></h2>
+      <p>检索 6 个同结构实验，命中配置差异 3 项、条件差异 2 项。</p>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-hd">
+        <span>三维度差异 · exp-2417 对比检索结果</span>
+        <span class="ct">检索 6 个同结构实验 · 配置 3 项、条件 2 项差异</span>
+      </div>
+      <table class="diff">
+        <thead>
+          <tr><th>维度 / 项</th><th>当前 exp-2417</th><th>对照实验</th><th style="text-align:right">历史关联</th></tr>
+        </thead>
+        <tbody>
+          <tr class="hit" id="diffRow1">
+            <td class="fkey">配置 · lr_schedule.stage2_peak</td>
+            <td class="fval-cur">3.0e-4</td>
+            <td class="fval-ref">1.2e-4 <span style="color:var(--text-3);font-size:10px">exp-2415</span></td>
+            <td style="text-align:right"><span class="rel rel-hi">2 次同类异常</span></td>
+          </tr>
+          <tr class="hit">
+            <td class="fkey">条件 · data.long_text_ratio</td>
+            <td class="fval-cur">44%</td>
+            <td class="fval-ref">31% <span style="color:var(--text-3);font-size:10px">exp-2422</span></td>
+            <td style="text-align:right"><span class="rel rel-hi">条件对照命中</span></td>
+          </tr>
+          <tr class="hit">
+            <td class="fkey">条件 · train_stage</td>
+            <td class="fval-cur">stage2（12.4k 起）</td>
+            <td class="fval-ref">stage1 时同配比正常</td>
+            <td style="text-align:right"><span class="rel rel-hi">条件对照命中</span></td>
+          </tr>
+          <tr class="hit">
+            <td class="fkey">配置 · data.shard_order</td>
+            <td class="fval-cur">shuffled(seed=77)</td>
+            <td class="fval-ref">shuffled(seed=42)</td>
+            <td style="text-align:right"><span class="rel">1 次同类异常</span></td>
+          </tr>
+          <tr>
+            <td class="fkey same">配置 · grad_clip</td>
+            <td class="same">2.0</td>
+            <td class="same">1.0</td>
+            <td style="text-align:right"><span class="rel">证据不足，已拦截</span></td>
+          </tr>
+          <tr>
+            <td class="fkey same">配置 · batch_size</td><td class="same">512</td><td class="same">512</td>
+            <td style="text-align:right"><span class="rel">一致</span></td>
+          </tr>
+          <tr>
+            <td class="fkey same">配置 · optimizer</td><td class="same">adamw</td><td class="same">adamw</td>
+            <td style="text-align:right"><span class="rel">一致</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-hd">
+        <span>异常窗口日志摘要<span class="llm-tag">大模型归纳</span></span>
+        <span class="ct">原始日志 8.4 GB / 8,192 rank · 已归纳为 4 条</span>
+      </div>
+      <div style="padding:14px">
+        <div class="ev">
+          <span class="ev-k">1</span>
+          <span class="ev-c">调度器在 12,400 步进入阶段二，峰值学习率由 1.20e-04 提升至 3.00e-04</span>
+          <button class="jump" data-jump="log" data-line="4" aria-label="跳转至原始日志第 8815 行">第 8815 行 ↗</button>
+        </div>
+        <div class="ev">
+          <span class="ev-k">2</span>
+          <span class="ev-c">紧随其后梯度范数由 0.78 跃升至 3.42，超出移动均值 4.3 倍并触发警告</span>
+          <button class="jump" data-jump="log" data-line="6" aria-label="跳转至原始日志第 8817 行">第 8817 行 ↗</button>
+        </div>
+        <div class="ev">
+          <span class="ev-k">3</span>
+          <span class="ev-c">同期数据加载器切换至 shard-037，平均样本长度 7,812，显著高于其余分片</span>
+          <button class="jump" data-jump="log" data-line="7" aria-label="跳转至原始日志第 8818 行">第 8818 行 ↗</button>
+        </div>
+        <div class="ev">
+          <span class="ev-k">4</span>
+          <span class="ev-c">全部 8,192 个 rank 表现一致，无个别节点偏离，无通信超时或硬件告警记录</span>
+          <button class="jump" aria-label="查看 rank 级指标离散度明细">rank 明细 ↗</button>
+        </div>
+        <div class="verify">
+          <span>✓</span><div>证据一致性校验<b>通过</b> —— 摘要引用的 3 处行号与 6 项数值均与原始日志逐一核对一致，未发现引用错误</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel-hd">
+          <span>原始训练日志 · 异常窗口</span>
+          <span class="ct">exp-2417 / rank0.log 第 8,812 – 8,821 行</span>
+        </div>
+        <div style="padding:14px">
+          <div class="logbox" id="logbox">
+            <div class="logline" data-ln="1"><span class="ln-no">8812</span><span class="ln-tx">[14:31:02] step 12380 | loss 2.141 | grad_norm 0.79 | lr 1.20e-04</span></div>
+            <div class="logline" data-ln="2"><span class="ln-no">8813</span><span class="ln-tx">[14:31:24] step 12390 | loss 2.138 | grad_norm 0.81 | lr 1.20e-04</span></div>
+            <div class="logline" data-ln="3"><span class="ln-no">8814</span><span class="ln-tx">[14:31:47] step 12400 | loss 2.133 | grad_norm 0.78 | lr 1.20e-04</span></div>
+            <div class="logline" data-ln="4"><span class="ln-no">8815</span><span class="ln-tx lg-warn">[14:31:47] SCHEDULER: entering stage 2 — peak_lr set to 3.00e-04</span></div>
+            <div class="logline" data-ln="5"><span class="ln-no">8816</span><span class="ln-tx">[14:32:08] step 12410 | loss 2.891 | grad_norm 3.42 | lr 3.00e-04</span></div>
+            <div class="logline" data-ln="6"><span class="ln-no">8817</span><span class="ln-tx lg-err">[14:32:08] WARN: grad_norm 3.42 exceeds moving average by 4.3x</span></div>
+            <div class="logline" data-ln="7"><span class="ln-no">8818</span><span class="ln-tx">[14:32:11] DATALOADER: shard-037 active | avg_token_len 7812</span></div>
+            <div class="logline" data-ln="8"><span class="ln-no">8819</span><span class="ln-tx">[14:32:31] step 12420 | loss 3.402 | grad_norm 4.05 | lr 3.00e-04</span></div>
+            <div class="logline" data-ln="9"><span class="ln-no">8820</span><span class="ln-tx">[14:32:54] step 12430 | loss 3.774 | grad_norm 4.18 | lr 3.00e-04</span></div>
+            <div class="logline" data-ln="10"><span class="ln-no">8821</span><span class="ln-tx">[14:33:16] step 12440 | loss 3.871 | grad_norm 4.21 | lr 3.00e-04</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hd"><span>分级取证</span><span class="ct">一级冻结 2.3 MB · 二级按需</span></div>
+        <div style="padding:14px">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;letter-spacing:.03em">一级 · 触发即冻结（必存）</div>
+          <div class="ev"><span class="ev-k">配置快照</span><span class="ev-c">全量超参与调度策略 · tp=2 pp=4 dp=8 · <code>seed=77</code></span><button class="jump" aria-label="查看配置快照原始记录">查看 ↗</button></div>
+          <div class="ev"><span class="ev-k">数据配比</span><span class="ev-c">corpus-v4.2 · 长文本占比 <code>44%</code> · 分片 037/128 · 阶段二</span><button class="jump" aria-label="查看数据配比原始记录">查看 ↗</button></div>
+          <div class="ev"><span class="ev-k">指标序列</span><span class="ev-c">异常窗口多指标曲线 + 8,192 rank 离散度 <code>0.03</code></span><button class="jump" aria-label="查看指标序列原始记录">查看 ↗</button></div>
+          <div class="ev"><span class="ev-k">命中日志行</span><span class="ev-c">3 条命中规则的日志行及其行号指针</span><button class="jump" data-jump="log" data-line="4" aria-label="跳转至命中日志行">定位 ↗</button></div>
+          <div class="ev"><span class="ev-k">环境事件</span><span class="ev-c">窗口内无硬件告警、无通信超时，可排除基础设施因素</span></div>
+
+          <div style="font-size:11px;color:var(--text-3);margin:14px 0 8px;letter-spacing:.03em">二级 · 按实验编号实时拉取（不预存）</div>
+          <div class="ev"><span class="ev-k">完整日志</span><span class="ev-c">8.4 GB / 8,192 rank，点击时按需检索</span><button class="jump" data-jump="log" data-line="1" aria-label="按需拉取完整原始日志">拉取 ↗</button></div>
+          <div class="ev"><span class="ev-k">检查点</span><span class="ev-c">最近可用 <code>ckpt-12000</code>（异常前 400 步）</span><button class="jump" aria-label="查看检查点元信息">查看 ↗</button></div>
+
+          <div style="margin-top:14px" class="nores">一级证据 5/5 项完整</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn btn-primary" data-go="4">确认结论并反馈</button>
+      <button class="btn btn-ghost" data-go="2">返回诊断结论</button>
+    </div>
+  </section>
+
+  <!-- ============ 视图 4：确认与回流 ============ -->
+  <section class="view" id="v4" role="tabpanel">
+    <div class="vhead">
+      <h2>确认结论与经验回流<span class="actor-tag actor-hum">工程师拍板</span></h2>
+      <p>确认后写入案例库，供后续同类异常检索。</p>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel-hd"><span>结论确认</span><span class="ct">exp-2417</span></div>
+        <div style="padding:16px">
+
+          <div class="form-row">
+            <label>结论判断 <span class="req">*</span></label>
+            <div class="opts" id="adoptOpts">
+              <label class="opt on"><input type="radio" name="adopt" value="a1" checked>
+                <span class="opt-t">采纳第 1 条：学习率调度阶段二峰值过高<i>置信度 高</i></span></label>
+              <label class="opt"><input type="radio" name="adopt" value="a2">
+                <span class="opt-t">采纳第 2 条：条件触发型，配比与阶段叠加<i>置信度 中</i></span></label>
+              <label class="opt shelve"><input type="radio" name="adopt" value="shelve">
+                <span class="opt-t">搁置，自行排查<i>需填写原因</i></span></label>
+              <label class="opt"><input type="radio" name="adopt" value="rej">
+                <span class="opt-t">全部否决，真实原因不在候选中<i>将用于修正规则</i></span></label>
+            </div>
+            <div class="sub-q" id="shelveWhy">
+              <label>搁置原因 <span class="req">*</span></label>
+              <select id="shelveReason">
+                <option>证据不足，无法判断</option>
+                <option>结论表述不清</option>
+                <option>与本次异常不相关</option>
+                <option>需要更多上下文</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label>证据是否支撑该结论 <span class="req">*</span></label>
+            <select id="evOk">
+              <option>是 — 证据链可直接支撑，无需额外核对</option>
+              <option>部分 — 结论合理但需自行补充核对</option>
+              <option>否 — 结论正确但理由站不住</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label>最终确认的真实原因（可自由填写，不限于候选项）</label>
+            <textarea id="realCause">阶段二峰值学习率未随批次规模同步调整，切换瞬间梯度范数跃升导致 loss 反弹。shard-037 长样本为次要放大因素，非主因。</textarea>
+          </div>
+
+          <div class="form-row">
+            <label>处置动作 <span class="req">*</span></label>
+            <select id="action">
+              <option>从 ckpt-12000 回滚并下调 stage2_peak 至 1.2e-4 后重跑</option>
+              <option>调整配置后从头重跑</option>
+              <option>修复数据分片后继续训练</option>
+              <option>判定为可接受波动，继续训练</option>
+            </select>
+          </div>
+
+          <div class="btnrow">
+            <button class="btn btn-primary" id="submitBtn">提交结论并回流至案例库</button>
+            <button class="btn btn-ghost" data-go="3">返回证据</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <div class="panel-hd"><span>本次诊断记录</span><span class="ct">系统自动留存</span></div>
+          <div style="padding:14px">
+            <div class="ev"><span class="ev-k">异常类型</span><span class="ev-c">Loss 突变 · 第 12,400 步 · 归属域「任务内部」</span></div>
+            <div class="ev"><span class="ev-k">诊断时延</span><span class="ev-c">触发到结论可见 <code>48 秒</code>；万卡任务每分钟约 <code>136 卡时</code></span></div>
+            <div class="ev"><span class="ev-k">人工定位耗时</span><span class="ev-c">本次 <code>6 分 12 秒</code>；同类异常历史人工均值 <code>52 分钟</code></span></div>
+            <div class="ev"><span class="ev-k">溯源行为</span><span class="ev-c">触发 3 次证据跳转，未使用按需日志拉取</span></div>
+            <div class="ev"><span class="ev-k">取证开销</span><span class="ev-c">一级冻结 <code>2.3 MB</code>；二级未拉取</span></div>
+            <div class="ev"><span class="ev-k">校验结果</span><span class="ev-c">大模型输出证据一致性校验 <code>2/2</code> 通过，无引用错误</span></div>
+          </div>
+        </div>
+
+        <div class="flowback" id="flowback" role="status">
+          <div class="fb-t"><span>✓</span>结论已回流</div>
+          <ul class="fb-list">
+            <li>案例已写入库，编号 <b>case-0418</b>，类型「Loss 突变 / 学习率调度」</li>
+            <li>已记录条件标注：长文本占比 44% + 阶段二</li>
+            <li><b>lr_schedule.stage2_peak</b> 关联权重已上调</li>
+            <li>案例库累计 <b>418</b> 条</li>
+            <li>未执行配置修改，回滚请在训练管理页手动触发</li>
+          </ul>
+        </div>
+
+        <div class="fb-warn" id="flowbackShelve" role="status">
+          <div class="fb-t"><span>!</span>已记为搁置</div>
+          <ul class="fb-list">
+            <li>记为中性样本，不调整规则权重</li>
+            <li>搁置原因已归类，进入复核队列</li>
+            <li>本周期搁置率 <b>12.9%</b></li>
+            <li><button class="jump" id="pullLog" aria-label="带上下文跳进原始日志">带上下文跳进原始日志 ↗</button></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  </main>
+
+  <p class="footnote">
+    交互原型 · 页面中的实验编号、指标数值与日志内容均为演示用例。
+  </p>
+</div>
+
+<script>
+(function(){
+  var views=[].slice.call(document.querySelectorAll('.view'));
+  var steps=[].slice.call(document.querySelectorAll('.step'));
+  var maxSeen=0;
+
+  function go(i){
+    i=Number(i);
+    views.forEach(function(v,k){v.classList.toggle('on',k===i)});
+    maxSeen=Math.max(maxSeen,i);
+    steps.forEach(function(s,k){
+      s.classList.toggle('on',k===i);
+      s.classList.toggle('done',k<maxSeen&&k!==i);
+      s.setAttribute('aria-selected',k===i?'true':'false');
+    });
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  document.addEventListener('click',function(e){
+    var g=e.target.closest('[data-go]');
+    if(g){go(g.getAttribute('data-go'));return}
+
+    var row=e.target.closest('#alertRow');
+    if(row){go(1);return}
+
+    var pull=e.target.closest('#pullLog');
+    if(pull){
+      go(3);
+      setTimeout(function(){
+        var box=document.getElementById('logbox');
+        if(box)box.scrollIntoView({block:'center',behavior:'smooth'});
+      },260);
+      return;
+    }
+
+    var hd=e.target.closest('.cause-hd');
+    if(hd){
+      var c=hd.parentElement, wasOpen=c.classList.contains('open');
+      document.querySelectorAll('.cause').forEach(function(x){
+        x.classList.remove('open','sel');
+        x.querySelector('.cause-hd').setAttribute('aria-expanded','false');
+      });
+      if(!wasOpen){
+        c.classList.add('open','sel');
+        hd.setAttribute('aria-expanded','true');
+      }
+      return;
+    }
+
+    var j=e.target.closest('.jump');
+    if(j){
+      var kind=j.getAttribute('data-jump');
+      if(kind==='log'){
+        go(3);
+        var ln=j.getAttribute('data-line');
+        setTimeout(function(){
+          document.querySelectorAll('.logline').forEach(function(l){l.classList.remove('hl','flash')});
+          var t=document.querySelector('.logline[data-ln="'+ln+'"]');
+          if(t){
+            t.classList.add('hl','flash');
+            t.scrollIntoView({block:'center',behavior:'smooth'});
+          }
+        },260);
+      }else if(kind==='cfg'){
+        go(3);
+        setTimeout(function(){
+          var r=document.getElementById('diffRow1');
+          if(r)r.scrollIntoView({block:'center',behavior:'smooth'});
+        },260);
+      }
+      return;
+    }
+
+    var sb=e.target.closest('#submitBtn');
+    if(sb){
+      var pick=document.querySelector('#adoptOpts input:checked');
+      var isShelve=pick&&pick.value==='shelve';
+      document.getElementById('flowback').classList.toggle('on',!isShelve);
+      document.getElementById('flowbackShelve').classList.toggle('on',isShelve);
+      sb.textContent=isShelve?'已记为搁置 ✓':'已提交 ✓';
+      sb.disabled=true;
+      sb.style.opacity='.6';
+      setTimeout(function(){
+        var t=document.getElementById(isShelve?'flowbackShelve':'flowback');
+        t.scrollIntoView({block:'center',behavior:'smooth'});
+      },80);
+    }
+  });
+
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Enter'||e.key===' '){
+      if(e.target.id==='alertRow'){e.preventDefault();go(1)}
+    }
+  });
+
+  document.querySelectorAll('#adoptOpts .opt').forEach(function(o){
+    o.addEventListener('change',function(){
+      document.querySelectorAll('#adoptOpts .opt').forEach(function(x){x.classList.remove('on')});
+      o.classList.add('on');
+      var v=o.querySelector('input').value;
+      document.getElementById('shelveWhy').classList.toggle('on',v==='shelve');
+      var sb=document.getElementById('submitBtn');
+      sb.textContent=(v==='shelve')?'记为搁置并提交反馈':'提交结论并回流至案例库';
+      sb.disabled=false;sb.style.opacity='1';
+      document.getElementById('flowback').classList.remove('on');
+      document.getElementById('flowbackShelve').classList.remove('on');
+    });
+  });
+})();
+</script>
+</body>
+</html>
